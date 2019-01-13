@@ -3,6 +3,7 @@ from astropy.modeling.blackbody import blackbody_nu
 from ... import units
 from pathlib import Path
 from ..template import Model, check_freq_input, read_map
+import healpy as hp
 
 class ModifiedBlackBody(Model):
     """ This is a model for modified black body emission.
@@ -41,15 +42,18 @@ class ModifiedBlackBody(Model):
         """
         Model.__init__(self, mpi_comm)
         # do model setup
-        self.I_ref = read_map(map_I, nside)[None, :] * units.uK
-        self.Q_ref = read_map(map_Q, nside)[None, :] * units.uK
-        self.U_ref = read_map(map_U, nside)[None, :] * units.uK
-        self.freq_ref_I = float(freq_ref_I) * units.GHz
-        self.freq_ref_P = float(freq_ref_P) * units.GHz
-        self.mbb_index = read_map(map_mbb_index, nside)[None, :]
-        self.mbb_temperature = read_map(map_mbb_temperature,
-                                        nside)[None, :] * units.K
-        self.nside = nside
+        self.__mbb_index = read_map(map_mbb_index, nside)[None, :]
+        self.__mbb_temperature = read_map(map_mbb_temperature, nside)[None, :] * units.K
+
+        freq_ref_I = float(freq_ref_I) * units.GHz
+        freq_ref_P = float(freq_ref_P) * units.GHz
+        self.__iqu_ref_freqs = units.Quantity([freq_ref_I] + 2* [freq_ref_P])
+
+        npix = hp.nside2npix(nside)
+        self.__iqu_ref = np.empty((3, npix)) * units.uK_RJ
+        self.__iqu_ref[0] = read_map(map_I, nside)[None, :] * units.uK_RJ
+        self.__iqu_ref[1] = read_map(map_Q, nside)[None, :] * units.uK_RJ
+        self.__iqu_ref[2] = read_map(map_U, nside)[None, :] * units.uK_RJ
 
         @property
         def freq_ref_I(self):
@@ -101,22 +105,13 @@ class ModifiedBlackBody(Model):
             Set of maps at the given frequency or frequencies. This will have
             shape (nfreq, 3, npix).
         """
-        # freqs must be given in GHz.
         freqs = check_freq_input(freqs)
-        outputs = []
-        for freq in freqs:
-            I_scal = (freq / self.freq_ref_I) ** (self.mbb_index - 2.)
-            P_scal = (freq / self.freq_ref_P) ** (self.mbb_index - 2.)
-            I_scal *= blackbody_ratio(freq, self.freq_ref_I,
-                                      self.mbb_temperature)
-            P_scal *= blackbody_ratio(freq, self.freq_ref_P,
-                                      self.mbb_temperature)
-            iqu_freq = np.concatenate((I_scal * self.I_ref,
-                                       P_scal * self.Q_ref,
-                                       P_scal * self.U_ref))
-            outputs.append(iqu_freq)
-        return np.array(outputs) * units.uK_RJ
-
+        # calculate scaling, shape will be (nfreqs, npol, npix)
+        scaling = mbb_sed(freqs[:, None, None], self.__iqu_ref_freqs[None, :, None],
+                          self.__mbb_index[None, None, :],
+                          self.__mbb_temperature[None, None, :])
+        # multiply scaling by templates, shape will be (nfreqs, npol, npix)
+        return scaling * self.__iqu_ref[None, ...]
 
 class DecorrelatedModifiedBlackBody(ModifiedBlackBody):
     def __init__(self, map_I=None, map_Q=None, map_U=None, freq_ref_I=None,
@@ -263,3 +258,26 @@ def blackbody_ratio(freq_to, freq_from, temp) -> units.dimensionless_unscaled:
         `temp`.
     """
     return blackbody_nu(freq_to, temp) / blackbody_nu(freq_from, temp)
+
+@units.quantity_input(freqs_to=units.GHz, freq_from=units.GHz, index=units.dimensionless_unscaled, temp=units.K)
+def mbb_sed(freqs_to, freq_from, index, temp) -> units.dimensionless_unscaled:
+    """ Function to calculate the scaling factor between frequencies freqs_to, and freq_from
+    assuming a blackbody sed.
+
+    Note that this assumes that the emission template being multiplied is in units of
+    uK_RJ, since we use beta - 2 as the index of the power law.
+
+    Parameters
+    ----------
+    freqs_to: astropy.units.Quantity
+        Array of frequencies to which we calculate the MBB scaling factor.
+    freq_from: astropy.units.Quantity
+    temp: astropy.units.Quantity
+    beta: astropy.units.Quantity
+
+    Returns
+    -------
+    astropy.units.Quantity
+        Array of scaling factors.
+    """
+    return (freqs_to / freq_from) ** (index - 2) * blackbody_ratio(freqs_to, freq_from, temp)
