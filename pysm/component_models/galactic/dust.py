@@ -42,18 +42,18 @@ class ModifiedBlackBody(Model):
         """
         Model.__init__(self, mpi_comm)
         # do model setup
-        self.__mbb_index = read_map(map_mbb_index, nside)[None, :]
-        self.__mbb_temperature = read_map(map_mbb_temperature, nside)[None, :] * units.K
+        self.__mbb_index = read_map(map_mbb_index, nside)
+        self.__mbb_temperature = read_map(map_mbb_temperature, nside) * units.K
 
         freq_ref_I = float(freq_ref_I) * units.GHz
         freq_ref_P = float(freq_ref_P) * units.GHz
-        self.__iqu_ref_freqs = units.Quantity([freq_ref_I] + 2* [freq_ref_P])
+        self.__iqu_ref_freqs = units.Quantity([freq_ref_I] + 2 * [freq_ref_P])
 
         npix = hp.nside2npix(nside)
         self.__iqu_ref = np.empty((3, npix)) * units.uK_RJ
-        self.__iqu_ref[0] = read_map(map_I, nside)[None, :] * units.uK_RJ
-        self.__iqu_ref[1] = read_map(map_Q, nside)[None, :] * units.uK_RJ
-        self.__iqu_ref[2] = read_map(map_U, nside)[None, :] * units.uK_RJ
+        self.__iqu_ref[0] = read_map(map_I, nside) * units.uK_RJ
+        self.__iqu_ref[1] = read_map(map_Q, nside) * units.uK_RJ
+        self.__iqu_ref[2] = read_map(map_U, nside) * units.uK_RJ
 
         @property
         def freq_ref_I(self):
@@ -88,8 +88,8 @@ class ModifiedBlackBody(Model):
             self.__freq_ref_P = value
         
 
-    @units.quantity_input
-    def get_emission(self, freqs: units.GHz) -> units.uK_RJ:
+    @units.quantity_input(freqs=units.GHz, equivalencies=units.spectral())
+    def get_emission(self, freqs) -> units.uK_RJ:
         """ This function evaluates the component model at a either
         a single frequency, an array of frequencies, or over a bandpass.
 
@@ -259,8 +259,9 @@ def blackbody_ratio(freq_to, freq_from, temp) -> units.dimensionless_unscaled:
     """
     return blackbody_nu(freq_to, temp) / blackbody_nu(freq_from, temp)
 
-@units.quantity_input(freqs_to=units.GHz, freq_from=units.GHz, index=units.dimensionless_unscaled, temp=units.K)
-def mbb_sed(freqs_to, freq_from, index, temp) -> units.dimensionless_unscaled:
+@units.quantity_input(freqs_to=units.GHz, freq_from=units.GHz, index=units.dimensionless_unscaled,
+                      temp=units.K, equivalencies=units.spectral())
+def mbb_sed(freqs_to, freqs_from, index, temp) -> units.dimensionless_unscaled:
     """ Function to calculate the scaling factor between frequencies freqs_to, and freq_from
     assuming a blackbody sed.
 
@@ -271,7 +272,7 @@ def mbb_sed(freqs_to, freq_from, index, temp) -> units.dimensionless_unscaled:
     ----------
     freqs_to: astropy.units.Quantity
         Array of frequencies to which we calculate the MBB scaling factor.
-    freq_from: astropy.units.Quantity
+    freqs_from: astropy.units.Quantity
     temp: astropy.units.Quantity
     beta: astropy.units.Quantity
 
@@ -280,4 +281,6 @@ def mbb_sed(freqs_to, freq_from, index, temp) -> units.dimensionless_unscaled:
     astropy.units.Quantity
         Array of scaling factors.
     """
-    return (freqs_to / freq_from) ** (index - 2) * blackbody_ratio(freqs_to, freq_from, temp)
+    freqs_to = freqs_to.to(units.GHz, equivalencies=units.spectral())
+    freqs_from = freqs_from.to(units.GHz, equivalencies=units.spectral())
+    return (freqs_to / freqs_from) ** (index - 2) * blackbody_ratio(freqs_to, freqs_from, temp)

@@ -11,7 +11,7 @@ import warnings
 import os.path
 import numpy as np
 import healpy as hp
-import astropy.units as units
+import ..units
 from astropy.io import fits
 from astropy.utils import data
 from ..constants import DATAURL
